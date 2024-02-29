@@ -10,16 +10,7 @@ pub const Program = struct {
             instruction.operate();
     }
 
-    pub fn zeroGradients(self: Program) void {
-        @memset(self.instructions[self.instructions.len - 1].output.gradient.elements, 1); // repeated calls are unnecessary; only need to call once at start of training
-
-        for (self.instructions) |instruction| {
-            for (instruction.inputs) |input|
-                @memset(input.gradient.elements, 0);
-        }
-    }
-
-    pub fn accumulateGradients(self: Program) void {
+    pub fn computeGradients(self: Program) void {
         var index: usize = self.instructions.len;
         while (index > 0) {
             index -= 1;
@@ -95,7 +86,7 @@ pub const Program = struct {
     pub const Instruction = struct {
         operation: Operation,
         inputs: []Symbol,
-        output: Symbol, // make this a slice too?
+        output: Symbol,
 
         pub fn operate(self: Instruction) void {
             switch (self.operation) {
@@ -113,7 +104,7 @@ pub const Program = struct {
             }
         }
 
-        pub const Operation = enum {
+        pub const Operation = enum { // remove unnecessary ones
             addition,
             matrix_multiplication,
             affine_transformation,

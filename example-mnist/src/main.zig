@@ -45,13 +45,18 @@ pub fn main() !void {
     const testing_labels = try Idx.initialize(allocator, testing_labels_file);
 
     const epochs = 10;
-    const mini_batch_size = 1;
+    const mini_batch_size = 100;
 
-    const learning_rate = 0.004; // TODO implement lr scheduling
+    const learning_rate = 0.4; // TODO implement lr scheduling
+
+    @memset(perceptron.loss.gradient.elements, 1);
 
     for (0..epochs) |epoch| {
         for (0..60_000 / mini_batch_size) |mini_batch| {
-            perceptron.program.zeroGradients();
+            for (perceptron.layers) |layer| {
+                inline for (.{ layer.accumulated_w_gradient, layer.accumulated_b_gradient }) |accumulated_gradient|
+                    @memset(accumulated_gradient.elements, 0);
+            }
 
             for (0..mini_batch_size) |mini_batch_example| {
                 for (perceptron.layers[0].n.value.elements, training_images.data[(mini_batch * mini_batch_size + mini_batch_example) * 28 * 28 ..][0 .. 28 * 28]) |*element, training_image_element|
@@ -62,13 +67,20 @@ pub fn main() !void {
                 @memset(perceptron.y.value.elements, 0);
                 perceptron.y.value.elements[training_labels.data[mini_batch * mini_batch_size + mini_batch_example]] = 1;
 
-                perceptron.program.accumulateGradients();
+                perceptron.program.computeGradients();
+
+                for (perceptron.layers) |layer| {
+                    inline for (.{ .{ layer.accumulated_w_gradient, layer.w }, .{ layer.accumulated_b_gradient, layer.b } }) |parameter_tuple| {
+                        for (parameter_tuple[0].elements, parameter_tuple[1].gradient.elements) |*accumulated_gradient_element, gradient_element|
+                            accumulated_gradient_element.* += gradient_element;
+                    }
+                }
             }
 
             for (perceptron.layers) |layer| {
-                inline for (.{ layer.w, layer.b }) |parameter| {
-                    for (parameter.value.elements, parameter.gradient.elements) |*value_element, gradient_element|
-                        value_element.* -= learning_rate * gradient_element; // sum or avg?
+                inline for (.{ .{ layer.w, layer.accumulated_w_gradient }, .{ layer.b, layer.accumulated_b_gradient } }) |parameter_tuple| {
+                    for (parameter_tuple[0].value.elements, parameter_tuple[1].elements) |*value_element, accumulated_gradient_element|
+                        value_element.* -= learning_rate * accumulated_gradient_element / mini_batch_size;
                 }
             }
         }
@@ -92,19 +104,25 @@ pub fn main() !void {
 
 const Perceptron = struct {
     program: Program,
+
     layers: []const Layer,
     output: Symbol,
+
     y: Symbol,
     loss: Symbol,
+
     loss_function: Operation,
 
     pub fn initializeForTraining(allocator: std.mem.Allocator, layers: []const Layer, loss_function: Operation) !Perceptron { // tagged union in place of layers slice to allow for loading of pretrianed pretrained parameters for further fine tuning
         var perceptron = Perceptron{
             .program = .{ .instructions = try allocator.alloc(Instruction, 2 * layers.len + 1) },
             .layers = layers,
+
             .output = try Symbol.initialize(allocator, layers[layers.len - 1].z.value.row_count, 1),
             .y = try Symbol.initialize(allocator, layers[layers.len - 1].z.value.row_count, 1),
+
             .loss = try Symbol.initialize(allocator, 1, 1),
+
             .loss_function = loss_function,
         };
         for (0..layers.len) |i| {
@@ -147,7 +165,11 @@ const Perceptron = struct {
         w: Symbol,
         b: Symbol,
         z: Symbol,
+
         activation_function: Operation,
+
+        accumulated_w_gradient: Matrix,
+        accumulated_b_gradient: Matrix,
 
         pub fn initialize(allocator: std.mem.Allocator, current_layer_neuron_count: usize, next_layer_neuron_count: usize, activation_function: Operation, random: std.rand.Random) !Layer {
             const layer = Layer{
@@ -155,7 +177,11 @@ const Perceptron = struct {
                 .w = try Symbol.initialize(allocator, next_layer_neuron_count, current_layer_neuron_count),
                 .b = try Symbol.initialize(allocator, next_layer_neuron_count, 1),
                 .z = try Symbol.initialize(allocator, next_layer_neuron_count, 1),
+
                 .activation_function = activation_function,
+
+                .accumulated_w_gradient = try Matrix.initialize(allocator, next_layer_neuron_count, current_layer_neuron_count),
+                .accumulated_b_gradient = try Matrix.initialize(allocator, next_layer_neuron_count, 1),
             };
 
             for (layer.w.value.elements) |*element| // switch activation_function and then decide initialization scheme?
@@ -170,6 +196,9 @@ const Perceptron = struct {
             self.n.free(allocator);
             self.w.free(allocator);
             self.b.free(allocator);
+
+            self.accumulated_w_gradient.free(allocator);
+            self.accumulated_b_gradient.free(allocator);
         }
     };
 };
