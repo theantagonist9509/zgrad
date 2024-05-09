@@ -44,7 +44,7 @@ pub const Program = struct {
                 },
                 .softsign => {
                     for (inputs[0].gradient.elements, inputs[0].value.elements, output.gradient.elements) |*gradient_element, value_element, output_gradient_element|
-                        gradient_element.* = output_gradient_element / ((1 + @fabs(value_element)) * (1 + @fabs(value_element)));
+                        gradient_element.* = output_gradient_element / ((1 + @abs(value_element)) * (1 + @abs(value_element)));
                 },
                 .softmax => {
                     var maximum = inputs[0].value.elements[0];

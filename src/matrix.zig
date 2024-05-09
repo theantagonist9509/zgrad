@@ -87,7 +87,7 @@ pub const Matrix = struct {
 
     pub fn softsign(out: Matrix, a: Matrix) void {
         for (out.elements, a.elements) |*element, a_element|
-            element.* = a_element / (1 + @fabs(a_element));
+            element.* = a_element / (1 + @abs(a_element));
     }
 
     pub fn softmax(out: Matrix, a: Matrix) void {
