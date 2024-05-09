@@ -17,7 +17,7 @@
     .dependencies = .{
         .zgrad = .{
             .url = "..",
-            .hash = "1220a7c2ab16387a098ae931724db63662bc2a42f12cd6923798ddad513c31da8a31",
+            .hash = "1220e2c8f2e1a1cb211c4042bb517ffbf053d3ff3d0e463f7375fd9f5e4264307e1c",
         },
     },
     .paths = .{

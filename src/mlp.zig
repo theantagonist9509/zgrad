@@ -101,11 +101,12 @@ pub const Mlp = struct {
                         try writer.writeInt(usize, pointer_list.items.len - 1, .little);
                         try writer.writeInt(usize, object.len, .little);
 
-                        for (object) |item| {
-                            switch (@typeInfo(@TypeOf(item))) {
-                                .Struct, .Pointer => try serializeObject(item, file, pointer_list),
-                                else => try writer.writeAll(std.mem.asBytes(&item)),
-                            }
+                        switch (@typeInfo(pointer_info.child)) {
+                            .Struct, .Pointer => {
+                                for (object) |item|
+                                    try serializeObject(item, file, pointer_list);
+                            },
+                            else => try writer.writeAll(bytesFromSlice(object)),
                         }
                     },
                     else => unreachable,
@@ -133,14 +134,15 @@ pub const Mlp = struct {
                             object_pointer.*.ptr = @ptrFromInt(pointer_list.items[pointer_index]);
                             object_pointer.*.len = length;
                         } else {
-                            object_pointer.* = try allocator.alloc(@TypeOf(object_pointer.*[0]), length);
+                            object_pointer.* = try allocator.alloc(pointer_info.child, length);
                             try pointer_list.append(allocator, @intFromPtr(object_pointer.*.ptr));
 
-                            for (object_pointer.*) |*item_pointer| {
-                                switch (@typeInfo(@TypeOf(item_pointer.*))) {
-                                    .Struct, .Pointer => try deserializeObject(allocator, item_pointer, file, pointer_list),
-                                    else => _ = try reader.readAll(std.mem.asBytes(item_pointer)),
-                                }
+                            switch (@typeInfo(pointer_info.child)) {
+                                .Struct, .Pointer => {
+                                    for (object_pointer.*) |*item_pointer|
+                                        try deserializeObject(allocator, item_pointer, file, pointer_list);
+                                },
+                                else => _ = try reader.readAll(bytesFromSlice(object_pointer.*)),
                             }
                         }
                     },
@@ -149,6 +151,13 @@ pub const Mlp = struct {
             },
             else => _ = try reader.readAll(std.mem.asBytes(object_pointer)),
         }
+    }
+
+    fn bytesFromSlice(slice: anytype) []u8 { // Zig 0.12.0 does not implement @ptrCast between slices of different lengths :(
+        var bytes: []u8 = undefined;
+        bytes.ptr = @ptrCast(slice.ptr);
+        bytes.len = slice.len * @sizeOf(@TypeOf(slice[0]));
+        return bytes;
     }
 
     pub const Layer = struct {
