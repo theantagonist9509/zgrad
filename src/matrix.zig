@@ -13,8 +13,9 @@ pub const Matrix = struct {
         };
     }
 
-    pub fn free(self: Matrix, allocator: std.mem.Allocator) void {
+    pub fn free(self: *Matrix, allocator: std.mem.Allocator) void {
         allocator.free(self.elements);
+        self.elements.len = 0; // To prevent freed matrices from being serialized
     }
 
     pub fn copy(destination: Matrix, source: Matrix) void {
@@ -47,6 +48,12 @@ pub const Matrix = struct {
     pub fn add(out: Matrix, a: Matrix, b: Matrix) void {
         for (out.elements, a.elements, b.elements) |*element, a_element, b_element|
             element.* = a_element + b_element;
+
+        // TODO implement matrix operations using simd
+        //const out_vector = @as(@Vector(out.elements.len, f32), out.elements);
+        //const a_vector = @as(@Vector(a.elements.len, f32), a.elements);
+        //const b_vector = @as(@Vector(b.elements.len, f32), b.elements);
+        //out_vector = a_vector + b_vector;
     }
 
     pub fn matrixMultiply(out: Matrix, a: Matrix, comptime transpose_a: bool, b: Matrix, comptime transpose_b: bool) void {
@@ -68,8 +75,12 @@ pub const Matrix = struct {
             const i = out.getI(index);
             const j = out.getJ(index);
 
-            for (0..a.column_count) |k|
+            for (0..a.column_count) |k| {
                 element.* += a.getElement(i, k, false) * b.getElement(k, j, false);
+                if (std.math.isNan(element.*)) {
+                    std.debug.print("a_element: {}, b_element: {}\n", .{ a.getElement(i, k, false), b.getElement(k, j, false) });
+                }
+            }
         }
     }
 
@@ -85,27 +96,45 @@ pub const Matrix = struct {
             element.* = if (a_element > 0) a_element else leaky_relu_slope * a_element;
     }
 
-    pub fn softsign(out: Matrix, a: Matrix) void {
+    pub fn sigmoid(out: Matrix, a: Matrix) void {
         for (out.elements, a.elements) |*element, a_element|
-            element.* = a_element / (1 + @abs(a_element));
+            element.* = 1 / (1 + @exp(-a_element));
     }
 
     pub fn softmax(out: Matrix, a: Matrix) void {
         var maximum = a.elements[0];
+
         for (a.elements[1..]) |element| {
             if (element > maximum)
                 maximum = element;
         }
 
         var sum: f32 = 0;
+
         for (a.elements) |element|
-            sum += @exp(element - maximum);
+            sum += @exp(element - maximum); // Biasing for numerical stability
 
         for (out.elements, a.elements) |*element, a_element|
             element.* = @exp(a_element - maximum) / sum;
     }
 
-    pub fn meanSquaredError(out: Matrix, a: Matrix, b: Matrix) void {
+    //pub fn layerNormalization(out: Matrix, a: Matrix) void {
+    //    var mean: f32 = 0;
+    //    var sd: f32 = 0;
+
+    //    for (a.elements) |element| {
+    //        mean += element;
+    //        sd += element * element;
+    //    }
+
+    //    mean /= a.elements.len;
+    //    sd = @sqrt(sd / a.elements.len - mean * mean);
+
+    //    for (out, a) |*element, a_element|
+    //        element.* = (a_element - mean) / sd;
+    //}
+
+    pub fn meanSquaredError(out: Matrix, a: Matrix, b: Matrix) void { // TODO reverse operands?
         var sum: f32 = 0;
 
         for (a.elements, b.elements) |a_element, b_element|
@@ -114,10 +143,15 @@ pub const Matrix = struct {
         out.elements[0] = sum / @as(f32, @floatFromInt(a.elements.len));
     }
 
-    pub fn crossEntropy(out: Matrix, a: Matrix, b: Matrix) void {
+    pub fn crossEntropy(out: Matrix, a: Matrix, b: Matrix) void { // TODO reverse operands?
         out.elements[0] = 0;
 
         for (a.elements, b.elements) |a_element, b_element|
-            out.elements[0] -= a_element * @log(b_element);
+            out.elements[0] -= a_element * @log(b_element + std.math.floatEps(f32)); // Biasing for numerical stability
+    }
+
+    // See utilities.zig
+    pub fn toggleSerializationFlag(self: *Matrix) void {
+        self.elements.len = std.math.maxInt(usize) - self.elements.len;
     }
 };

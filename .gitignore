@@ -1,2 +1,2 @@
 zig-cache/
-example-mnist/zig-*
+examples/*/zig-*
