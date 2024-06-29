@@ -1,11 +1,6 @@
-pub const core = .{
-    .Matrix = @import("matrix.zig").Matrix,
-    .Program = @import("program.zig").Program,
-};
-
-pub const utilities = @import("utilities.zig");
-
-pub const templates = .{
-    .Mlp = @import("mlp.zig").Mlp,
-    .Transformer = @import("transformer.zig").Transformer,
-};
+pub const Matrix = @import("matrix.zig");
+pub const Symbol = @import("symbol.zig");
+pub usingnamespace @import("core.zig");
+pub usingnamespace @import("optimizer.zig");
+pub usingnamespace @import("serializer.zig");
+pub usingnamespace @import("tuple.zig");

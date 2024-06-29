@@ -1,157 +1,149 @@
+// TODO implement matrix operations using simd
+
 const std = @import("std");
 
-pub const Matrix = struct {
-    row_count: usize,
-    column_count: usize,
-    elements: []f32,
+const Matrix = @This();
 
-    pub fn initialize(allocator: std.mem.Allocator, row_count: usize, column_count: usize) !Matrix {
-        return .{
-            .row_count = row_count,
-            .column_count = column_count,
-            .elements = try allocator.alloc(f32, row_count * column_count),
-        };
+row_count: usize,
+column_count: usize,
+entries: []f32,
+
+pub fn initialize(allocator: std.mem.Allocator, row_count: usize, column_count: usize) !Matrix {
+    return .{
+        .row_count = row_count,
+        .column_count = column_count,
+        .entries = try allocator.alloc(f32, row_count * column_count),
+    };
+}
+
+pub fn free(self: *Matrix, allocator: std.mem.Allocator) void {
+    allocator.free(self.entries);
+    self.entries.len = 0; // To prevent freed matrices from being serialized
+}
+
+pub fn getEntry(self: Matrix, i: usize, j: usize, comptime transpose: bool) f32 {
+    return self.entries[if (transpose) (j * self.column_count + i) else (i * self.column_count + j)];
+}
+
+pub fn getI(self: Matrix, index: usize) usize { // rename to getRowIndex?
+    return index / self.column_count;
+}
+
+pub fn getJ(self: Matrix, index: usize) usize { // rename to getColumnIndex?
+    return index % self.column_count;
+}
+
+pub fn argmax(self: Matrix) usize {
+    var maximum_index: usize = 0;
+
+    for (self.entries[1..], 1..) |entry, i| {
+        if (entry > self.entries[maximum_index])
+            maximum_index = i;
     }
 
-    pub fn free(self: *Matrix, allocator: std.mem.Allocator) void {
-        allocator.free(self.elements);
-        self.elements.len = 0; // To prevent freed matrices from being serialized
+    return maximum_index;
+}
+
+pub fn accumulate(out: Matrix, a: Matrix) void {
+    for (out.entries, a.entries) |*entry, a_entry|
+        entry.* += a_entry;
+}
+
+pub fn hadamardMultiply(out: Matrix, a: Matrix, b: Matrix) void {
+    for (out.entries, a.entries, b.entries) |*entry, a_entry, b_entry|
+        entry.* = a_entry * b_entry;
+}
+
+pub fn matrixMultiply(out: Matrix, a: Matrix, comptime transpose_a: bool, b: Matrix, comptime transpose_b: bool) void {
+    @memset(out.entries, 0);
+    matrixMultiplyAccumulate(out, a, transpose_a, b, transpose_b);
+}
+
+// wx + b
+pub fn affineTransform(out: Matrix, x: Matrix, w: Matrix, b: Matrix) void {
+    @memcpy(out.entries, b.entries);
+    matrixMultiplyAccumulate(out, w, false, x, false);
+}
+
+pub fn matrixMultiplyAccumulate(out: Matrix, a: Matrix, comptime transpose_a: bool, b: Matrix, comptime transpose_b: bool) void {
+    for (out.entries, 0..) |*entry, index| {
+        const i = out.getI(index);
+        const j = out.getJ(index);
+
+        for (0..(if (transpose_a) a.row_count else a.column_count)) |k|
+            entry.* += a.getEntry(i, k, transpose_a) * b.getEntry(k, j, transpose_b);
+    }
+}
+
+pub fn relu(out: Matrix, a: Matrix) void { // TODO change this stuff to return result and use it as needed in core.zig
+    leakyRelu(0, out, a);
+}
+
+pub fn leakyRelu(slope: comptime_float, out: Matrix, a: Matrix) void {
+    for (out.entries, a.entries) |*entry, a_entry|
+        entry.* = if (a_entry > 0) a_entry else slope * a_entry;
+}
+
+pub fn tanh(out: Matrix, a: Matrix) void {
+    for (out.entries, a.entries) |*entry, a_entry|
+        entry.* = 1 - 2 / (1 + @exp(2 * a_entry));
+}
+
+pub fn sigmoid(out: Matrix, a: Matrix) void {
+    for (out.entries, a.entries) |*entry, a_entry|
+        entry.* = 1 / (1 + @exp(-a_entry));
+}
+
+pub fn softmax(out: Matrix, a: Matrix) void {
+    var maximum = a.entries[0];
+
+    for (a.entries[1..]) |entry| {
+        if (entry > maximum)
+            maximum = entry;
     }
 
-    pub fn copy(destination: Matrix, source: Matrix) void {
-        @memcpy(destination.elements, source.elements);
-    }
+    var sum: f32 = 0;
 
-    pub fn getElement(self: Matrix, i: usize, j: usize, comptime transpose: bool) f32 {
-        return self.elements[if (transpose) (j * self.column_count + i) else (i * self.column_count + j)];
-    }
+    for (a.entries) |entry|
+        sum += @exp(entry - maximum); // Biasing for numerical stability
 
-    pub fn getI(self: Matrix, index: usize) usize {
-        return index / self.column_count;
-    }
+    for (out.entries, a.entries) |*entry, a_entry|
+        entry.* = @exp(a_entry - maximum) / sum;
+}
 
-    pub fn getJ(self: Matrix, index: usize) usize {
-        return index % self.column_count;
-    }
+//pub fn layerNormalization(out: Matrix, a: Matrix) void {
+//    var mean: f32 = 0;
+//    var sd: f32 = 0;
 
-    pub fn argmax(self: Matrix) usize {
-        var maximum_index: usize = 0;
+//    for (a.entries) |entry| {
+//        mean += entry;
+//        sd += entry * entry;
+//    }
 
-        for (self.elements[1..], 1..) |element, i| {
-            if (element > self.elements[maximum_index])
-                maximum_index = i;
-        }
+//    mean /= a.entries.len;
+//    sd = @sqrt(sd / a.entries.len - mean * mean);
 
-        return maximum_index;
-    }
+//    for (out, a) |*entry, a_entry|
+//        entry.* = (a_entry - mean) / sd;
+//}
 
-    pub fn add(out: Matrix, a: Matrix, b: Matrix) void {
-        for (out.elements, a.elements, b.elements) |*element, a_element, b_element|
-            element.* = a_element + b_element;
+pub fn meanSquaredError(out: Matrix, y_hat: Matrix, y: Matrix) void { // TODO reverse operands?
+    var sum: f32 = 0;
 
-        // TODO implement matrix operations using simd
-        //const out_vector = @as(@Vector(out.elements.len, f32), out.elements);
-        //const a_vector = @as(@Vector(a.elements.len, f32), a.elements);
-        //const b_vector = @as(@Vector(b.elements.len, f32), b.elements);
-        //out_vector = a_vector + b_vector;
-    }
+    for (y_hat.entries, y.entries) |y_hat_entry, y_entry|
+        sum += (y_hat_entry - y_entry) * (y_hat_entry - y_entry);
 
-    pub fn matrixMultiply(out: Matrix, a: Matrix, comptime transpose_a: bool, b: Matrix, comptime transpose_b: bool) void {
-        @memset(out.elements, 0);
+    out.entries[0] = sum / @as(f32, @floatFromInt(y_hat.entries.len));
+}
 
-        for (out.elements, 0..) |*element, index| {
-            const i = out.getI(index);
-            const j = out.getJ(index);
+pub fn crossEntropy(out: Matrix, y_hat: Matrix, y: Matrix) void { // TODO reverse operands?
+    out.entries[0] = 0;
 
-            for (0..(if (transpose_a) a.row_count else a.column_count)) |k|
-                element.* += a.getElement(i, k, transpose_a) * b.getElement(k, j, transpose_b);
-        }
-    }
+    for (y_hat.entries, y.entries) |y_hat_entry, y_entry|
+        out.entries[0] -= y_entry * @log(y_hat_entry + std.math.floatEps(f32)); // Biasing for numerical stability; TODO make bias larger than floatEps(f32)?
+}
 
-    pub fn affineTransform(out: Matrix, a: Matrix, b: Matrix, c: Matrix) void {
-        @memcpy(out.elements, c.elements);
-
-        for (out.elements, 0..) |*element, index| {
-            const i = out.getI(index);
-            const j = out.getJ(index);
-
-            for (0..a.column_count) |k| {
-                element.* += a.getElement(i, k, false) * b.getElement(k, j, false);
-                if (std.math.isNan(element.*)) {
-                    std.debug.print("a_element: {}, b_element: {}\n", .{ a.getElement(i, k, false), b.getElement(k, j, false) });
-                }
-            }
-        }
-    }
-
-    pub fn relu(out: Matrix, a: Matrix) void {
-        for (out.elements, a.elements) |*element, a_element|
-            element.* = if (a_element > 0) a_element else 0;
-    }
-
-    pub const leaky_relu_slope = 0.1;
-
-    pub fn leakyRelu(out: Matrix, a: Matrix) void {
-        for (out.elements, a.elements) |*element, a_element|
-            element.* = if (a_element > 0) a_element else leaky_relu_slope * a_element;
-    }
-
-    pub fn sigmoid(out: Matrix, a: Matrix) void {
-        for (out.elements, a.elements) |*element, a_element|
-            element.* = 1 / (1 + @exp(-a_element));
-    }
-
-    pub fn softmax(out: Matrix, a: Matrix) void {
-        var maximum = a.elements[0];
-
-        for (a.elements[1..]) |element| {
-            if (element > maximum)
-                maximum = element;
-        }
-
-        var sum: f32 = 0;
-
-        for (a.elements) |element|
-            sum += @exp(element - maximum); // Biasing for numerical stability
-
-        for (out.elements, a.elements) |*element, a_element|
-            element.* = @exp(a_element - maximum) / sum;
-    }
-
-    //pub fn layerNormalization(out: Matrix, a: Matrix) void {
-    //    var mean: f32 = 0;
-    //    var sd: f32 = 0;
-
-    //    for (a.elements) |element| {
-    //        mean += element;
-    //        sd += element * element;
-    //    }
-
-    //    mean /= a.elements.len;
-    //    sd = @sqrt(sd / a.elements.len - mean * mean);
-
-    //    for (out, a) |*element, a_element|
-    //        element.* = (a_element - mean) / sd;
-    //}
-
-    pub fn meanSquaredError(out: Matrix, a: Matrix, b: Matrix) void { // TODO reverse operands?
-        var sum: f32 = 0;
-
-        for (a.elements, b.elements) |a_element, b_element|
-            sum += (a_element - b_element) * (a_element - b_element);
-
-        out.elements[0] = sum / @as(f32, @floatFromInt(a.elements.len));
-    }
-
-    pub fn crossEntropy(out: Matrix, a: Matrix, b: Matrix) void { // TODO reverse operands?
-        out.elements[0] = 0;
-
-        for (a.elements, b.elements) |a_element, b_element|
-            out.elements[0] -= a_element * @log(b_element + std.math.floatEps(f32)); // Biasing for numerical stability
-    }
-
-    // See utilities.zig
-    pub fn toggleSerializationFlag(self: *Matrix) void {
-        self.elements.len = std.math.maxInt(usize) - self.elements.len;
-    }
-};
+// See utilities.zig
+pub fn toggleSerializationFlag(self: *Matrix) void {
+    self.entries.len = std.math.maxInt(usize) - self.entries.len;
+}
